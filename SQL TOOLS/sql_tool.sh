@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#Colores
+## [ Colores ]
 greenColor="\e[0;32m\033[1m"
 redColor="\e[0;31m\033[1m"
 blueColor="\e[0;34m\033[1m"
@@ -10,27 +10,39 @@ turquoiseColor="\e[0;36m\033[1m"
 grayColor="\e[0;37m\033[1m"
 endColor="\033[0m\e[0m"
 
+## [ Ctrl + C ]
 function ctrl_c() {
     echo -e "\n\n[${redColor}!${endColor}] Saliendo...\n"
     tput cnorm && exit 1
-}
-
-## [ Ctrl + C ]
+} 
 trap ctrl_c INT
 
+## [ Spinner ]
+function spinner() {
+  tput civis
+  local pid=$1
+  local delay=0.15
+  local spinstr='|/-\'
+  
+  while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+    local temp=${spinstr#?}
+    printf "[${greenColor}%c${endColor}] Cargando..." "$spinstr"
+    local spinstr=$temp${spinstr%"$temp"}
+    sleep $delay
+    printf "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b"
+  done
+  printf "                \b\b\b\b"
+  tput cnorm
+}
+
 ## [ Variables globales ] 
-
-# array bases de datos
 databases=()
-
-# Query a ejecutar
 query=""
 nameProcedure=""
 parametersProcedure=""
-# Logs
-logs=""
+log=""
 
-# Panel de ayuda
+## [ Panel de ayuda ]
 function helpPanel() {
     echo -e "[${yellowColor}!${endColor}] Ejemplo de uso: ${grayColor}$0${endColor} ${purpleColor} -v -m -f${endColor} /ruta/script.sql"
     echo -e "[${yellowColor}!${endColor}] Ejemplo de uso: ${grayColor}$0${endColor} ${purpleColor} -qvm ${endColor}"
@@ -46,47 +58,68 @@ ejemplo: [${purpleColor}-qv${endColor}][${purpleColor}-v -f${endColor}]"
     exit 1
 }
 
+## Mi firma
 function signature(){
-echo -e "\n${redColor}[>_]${endColor}${grayColor} Script para ejecutar consultas SQL en MySQL${endColor}."
+    echo -e "\n${redColor}[>_]${endColor}${grayColor} Script para automatizar tareas en MySQL${endColor}."
 
-echo -e "   ${redColor}  ______  "
-echo -e "    /\___  \ "
-echo -e "    \/_/  /__ "   
-echo -e "      /\_____\ X M B R X N X"
-echo -e "____ _\/_____/ ________ __ ____"
+    echo -e "   ${redColor}  ______  "
+    echo -e " J  /\___  \ "
+    echo -e "    \/_/  /__ "   
+    echo -e "      /\_____\ X M B R X N X"
+    echo -e "____ _\/_____/ ________ __ ____"
 
-echo -e "${endColor}"
+    echo -e "${endColor}"
 }
 
+# Imprimir firma
 signature
+
+# Obtener las bases de datos
+function getDatabases(){
+    local usuario=$1
+    local pass=$2
+
+    # Obtener la lista de bases de datos y guardarla en un archivo temporal
+    mysql -u ${usuario} -p${pass} -e "SHOW DATABASES;" | tr -d "| " | grep -v "Database\|information_schema\|performance_schema\|mysql" > temp_databases.txt
+    sleep 1
+}
+
 # Obtener usuario y contraseña de la base de datos
 function init(){
-    # Pide al usuario el usuario y la contraseña de la base de datos
     printf "\n[${greenColor}*${endColor}] Ingrese el usuario: "
     read usuario
-    printf "\n[${greenColor}*${endColor}] Ingrese la contrasena: "
+    printf "[${greenColor}*${endColor}] Ingrese la contrasena: "
     read -s pass
 
     # Verifica si el usuario y la contraseña son correctos
     mysql -u ${usuario} -p${pass} -e "SHOW DATABASES;" > /dev/null 2>&1
-
     if [ $? -ne 0 ]; then
         echo -e "\n\n${redColor}[x]${endColor} El usuario o la contraseña son incorrectos."
         ctrl_c
     fi
 
+    echo
+    
+    getDatabases $usuario $pass &
+    funcion_pid=$! # Obtener el PID de la función
+    spinner $!
+    wait $funcion_pid # Esperar a que la función termine
+    
     # Crea un array para almacenar los nombres de las bases de datos
-    databases=($(mysql -u ${usuario} -p${pass} -e "SHOW DATABASES;" | tr -d "| " | grep -v "Database\|information_schema\|performance_schema\|mysql"))
+    databases=($(cat temp_databases.txt))
+    # Borrar el archivo temporal
+    rm temp_databases.txt
 
     # Calcular el número de elementos en el array
     num_elementos=${#databases[@]}
 
-    # Definir el número de columnas que deseas mostrar
+    # Definir el número de columnas a mostrar
     num_columnas=3
 
     # Calcular el número de filas necesarias para imprimir todos los elementos
     num_filas=$((num_elementos / num_columnas))
-    echo -e "\n\n"
+    
+    echo
     printf "+-----------------------------------------------------------------------------------------------+\n"
     echo -e "|                                      BASES DE DATOS                                           |"
     printf "+-----------------------------------------------------------------------------------------------+\n\n"
@@ -106,12 +139,13 @@ function init(){
         echo # Imprimir una nueva línea después de la última fila incompleta
     fi
 
+    # Pedir al usuario que ingrese los índices de las bases de datos a eliminar
     while true; do
-        # Pide al usuario el índice del elemento a eliminar
+
         printf "\n[${greenColor}+${endColor}] Ingrese los indices a eliminar (separados por espacios) o escriba [continuar]: "
         read -r indices_a_eliminar
 
-        # Verifica si el usuario ha decidido continuar
+        # Verificas si escribe continuar
         if [[ $indices_a_eliminar == "continuar" ]]; then
             break
         fi
@@ -166,12 +200,15 @@ function init(){
 function eliminar_elementos() {
     local indices_a_eliminar=("$@")
     local nuevo_array=()
+
     # Recorrer el array original y copiar los elementos que no estén en el array de índices a eliminar
     for i in $(seq 0 $((${#databases[@]} - 1))); do
+
         # Si el índice actual no está en el array de índices a eliminar, copiar el elemento
         if ! echo "${indices_a_eliminar[@]}" | grep -q "\b$i\b"; then
             nuevo_array+=("${databases[i]}")
         fi
+
     done
     # Actualizar el array original
     databases=("${nuevo_array[@]}")
@@ -221,6 +258,7 @@ function getQuery(){
 
 function confirmation(){
     local msg=$1
+
     #Confirmacion de la ejecucion del script.
     printf "\n[${purpleColor}!${endColor}] Esta seguro que desea ejecutar $msg en todas las bases de datos selecionadas?[si/no]: "
     
@@ -399,11 +437,12 @@ function runProcedure(){
 
     tput civis
     for db in "${databases[@]}"; do
-        #echo -n "[${db}]: "
+
         log="$log \n[${db}]:"
 
         queryProcedure="DELIMITER // \n"
         queryProcedure="${queryProcedure}CREATE DEFINER='${db}'@'%' PROCEDURE IF NOT EXISTS ${nameProcedure}(${parametersProcedure})"
+       
         # Cuerpo del procedimiento
         queryProcedure="${queryProcedure}\nBEGIN"
         queryProcedure="${queryProcedure} ${query}"
@@ -445,6 +484,7 @@ declare -i parameter_counter=0
 declare -i verbose=0
 declare -i force_mysql=0
 
+# Obtener los parametros ingresados
 while getopts "qpf:hvm" arg; do
     case $arg in
         q) 
@@ -480,12 +520,17 @@ while getopts "qpf:hvm" arg; do
     esac
 done
 
+# Ejectuar la función correspondiente según los parámetros ingresados
 if [ $parameter_counter -eq 1 ]; then
     runQuery
+
 elif [ $parameter_counter -eq 2 ]; then
     runQueryFile $filePath
+
 elif [ $parameter_counter -eq 3 ]; then
     runProcedure
+
 else
     helpPanel
+
 fi
